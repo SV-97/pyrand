@@ -154,6 +154,55 @@ impl<const N: usize> MTState<N> {
             v
         }
     }
+
+    pub fn randbelow_with_getrandbits(&mut self, excl_upper_bound: u32) -> u32 {
+        let num_bits = bit_length(excl_upper_bound as u32);
+        // this should support larger integer types as well - but we'll just do u32's for now
+        let mut r = self.getrandbits(num_bits)[0]; // 0 <= r < 2**k
+        while r >= excl_upper_bound {
+            r = self.getrandbits(num_bits)[0];
+        }
+        r
+    }
+
+    /// randrange version with only upper bound specified; lower is implicitly 0
+    pub fn randrange_from_zero(&mut self, excl_upper_bound: u32) -> Option<u32> {
+        if excl_upper_bound == 0 {
+            None
+        } else {
+            Some(self.randbelow_with_getrandbits(excl_upper_bound))
+        }
+    }
+
+    /// randrange version with both lower and upper bounds specified
+    pub fn randrange(&mut self, incl_lower: u32, excl_upper: u32, step: i64) -> Option<u32> {
+        let width = excl_upper - incl_lower;
+        match step {
+            1 if width > 0 => Some(incl_lower + self.randbelow_with_getrandbits(width)),
+            1 | 0 => None,
+            step => {
+                let n = if step > 0 {
+                    (width as i64 + step - 1) / step
+                } else {
+                    (width as i64 + step + 1) / step
+                };
+                if n <= 0 {
+                    None
+                } else {
+                    Some(incl_lower + step as u32 * self.randbelow_with_getrandbits(n as u32))
+                }
+            }
+        }
+    }
+}
+
+/// Minimal number of bits necessary to represent given number
+fn bit_length(n: u32) -> usize {
+    if n == 0 {
+        0
+    } else {
+        (n.ilog2() + 1) as usize
+    }
 }
 
 impl PyMt19937 {
@@ -504,6 +553,72 @@ mod tests {
             twister.choices(0..20).take(10).collect::<Vec<_>>(),
             &correct
         )
+    }
+
+    #[test]
+    fn randbelow() {
+        // `random.seed("Pizza"); [random.randrange(100) for i in range(10)]`
+        let correct = [25, 52, 24, 70, 14, 72, 70, 56, 43, 32];
+        let mut twister = PyMt19937::py_seed("Pizza");
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister.randbelow_with_getrandbits(100))
+                .collect::<Vec<_>>(),
+            &correct
+        );
+        // `[random.randrange(10_000) for i in range(10)]`
+        let correct = [2306, 7958, 1402, 2301, 2970, 7787, 5438, 6340, 7300, 140];
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister.randbelow_with_getrandbits(10_000))
+                .collect::<Vec<_>>(),
+            &correct
+        );
+    }
+
+    #[test]
+    fn rangrange_from_zero() {
+        // `random.seed("Pizza"); [random.randrange(43_057) for i in range(10)]`
+        let correct = [
+            13098, 26831, 12744, 36225, 7605, 37058, 35879, 28724, 22476, 16773,
+        ];
+        let mut twister = PyMt19937::py_seed("Pizza");
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister.randrange_from_zero(43_057).unwrap())
+                .collect::<Vec<_>>(),
+            &correct
+        );
+    }
+
+    #[test]
+    fn rangrange_unit_step() {
+        // `random.seed("Pizza"); [random.randrange(42, 43_057) for i in range(10)]`
+        let correct = [
+            13140, 26873, 12786, 36267, 7647, 37100, 35921, 28766, 22518, 16815,
+        ];
+        let mut twister = PyMt19937::py_seed("Pizza");
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister.randrange(42, 43_057, 1).unwrap())
+                .collect::<Vec<_>>(),
+            &correct
+        );
+    }
+
+    #[test]
+    fn rangrange_nonunit_step() {
+        // `random.seed("Pizza"); [random.randrange(42, 43_057, 12) for i in range(10)]`
+        let correct = [
+            9858, 20154, 9594, 38886, 27210, 5742, 27834, 40998, 26946, 21582,
+        ];
+        let mut twister = PyMt19937::py_seed("Pizza");
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister.randrange(42, 43_057, 12).unwrap())
+                .collect::<Vec<_>>(),
+            &correct
+        );
     }
 
     #[cfg(feature = "rand")]
