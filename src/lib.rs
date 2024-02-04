@@ -14,6 +14,7 @@
 //! Note that while a `rand` implementation is given you shouldn't expect most methods
 //! from `rand::Rand` to return the same values as their python counterparts.
 
+use num::{BigInt, BigUint, One, Signed, Zero};
 use sha2::{Digest, Sha512};
 
 const MATRIX_A: u32 = 0x9908b0df;
@@ -122,17 +123,17 @@ impl<const N: usize> MTState<N> {
         self.genrand_res53::<M_DEFAULT>()
     }
 
-    pub fn getrandbits(&mut self, num_bits: usize) -> Vec<u32> {
+    pub fn getrandbits(&mut self, num_bits: usize) -> BigUint {
         if num_bits == 0 {
-            vec![] // Python code returns the integer 0 here
+            Zero::zero() // Python code returns the integer 0 here
         } else if num_bits <= 32 {
-            /* Fast path */
-            vec![self.genrand_uint32_default() >> (32 - num_bits)]
+            // Fast path
+            BigUint::from(self.genrand_uint32_default() >> (32 - num_bits))
         } else {
             // python is using 32-bit words here to match the MT - we find
             // out how many of those we need
             let words = (num_bits - 1) / 32 + 1;
-            let mut v = Vec::with_capacity(words);
+            let mut v = Vec::with_capacity(words as usize);
             let mut remaining_bits = num_bits;
             if cfg!(target_endian = "big") {
                 // to implement this check _random_Random_getrandbits_impl
@@ -151,59 +152,76 @@ impl<const N: usize> MTState<N> {
                     remaining_bits = remaining_bits.saturating_sub(32);
                 }
             }
-            v
+            BigUint::new(v)
         }
     }
 
-    pub fn randbelow_with_getrandbits(&mut self, excl_upper_bound: u32) -> u32 {
-        let num_bits = bit_length(excl_upper_bound as u32);
-        // this should support larger integer types as well - but we'll just do u32's for now
-        let mut r = self.getrandbits(num_bits)[0]; // 0 <= r < 2**k
-        while r >= excl_upper_bound {
-            r = self.getrandbits(num_bits)[0];
+    /// Generates a random integer below a given (exclusive) upper bound
+    fn randbelow_with_getrandbits(&mut self, excl_upper_bound: &BigUint) -> BigUint {
+        let num_bits = excl_upper_bound.bits();
+        let mut r = self.getrandbits(num_bits as usize); // 0 <= r < 2**num_bits
+        while &r >= excl_upper_bound {
+            r = self.getrandbits(num_bits as usize);
         }
         r
     }
 
     /// randrange version with only upper bound specified; lower is implicitly 0
-    pub fn randrange_from_zero(&mut self, excl_upper_bound: u32) -> Option<u32> {
-        if excl_upper_bound == 0 {
+    pub fn randrange_from_zero(&mut self, excl_upper_bound: &BigUint) -> Option<BigUint> {
+        if excl_upper_bound.is_zero() {
             None
         } else {
-            Some(self.randbelow_with_getrandbits(excl_upper_bound))
+            Some(self.randbelow_with_getrandbits(&excl_upper_bound))
         }
     }
 
     /// randrange version with both lower and upper bounds specified
-    pub fn randrange(&mut self, incl_lower: u32, excl_upper: u32, step: i64) -> Option<u32> {
-        let width = excl_upper - incl_lower;
-        match step {
-            1 if width > 0 => Some(incl_lower + self.randbelow_with_getrandbits(width)),
-            1 | 0 => None,
-            step => {
-                let n = if step > 0 {
-                    (width as i64 + step - 1) / step
-                } else {
-                    (width as i64 + step + 1) / step
-                };
-                if n <= 0 {
-                    None
-                } else {
-                    Some(incl_lower + step as u32 * self.randbelow_with_getrandbits(n as u32))
-                }
+    pub fn randrange(
+        &mut self,
+        incl_lower: &BigInt,
+        excl_upper: &BigInt,
+        step: &BigInt,
+    ) -> Option<BigInt> {
+        // width is strictly positive
+        let width = {
+            let w = excl_upper.checked_sub(&incl_lower)?;
+            if w.is_positive() {
+                Some(BigUint::try_from(w).unwrap())
+            } else {
+                // note that we in particular return none if w is zero
+                None
+            }
+        }?;
+        if step.is_one() {
+            let r = BigInt::from(self.randbelow_with_getrandbits(&width));
+            Some(incl_lower.clone() + r)
+        } else if step.is_zero() {
+            None
+        } else {
+            let n: BigInt = if step.is_positive() {
+                (BigInt::from(width) + step - BigInt::one()) / step
+            } else {
+                (BigInt::from(width) + step + BigInt::one()) / step
+            };
+            if n.is_positive() {
+                let r =
+                    BigInt::from(self.randbelow_with_getrandbits(&BigUint::try_from(n).unwrap()));
+                Some(incl_lower + step * r)
+            } else {
+                None
             }
         }
     }
 }
 
-/// Minimal number of bits necessary to represent given number
-fn bit_length(n: u32) -> usize {
-    if n == 0 {
-        0
-    } else {
-        (n.ilog2() + 1) as usize
-    }
-}
+// Minimal number of bits necessary to represent given number
+// fn bit_length(n: u32) -> usize {
+//     if n == 0 {
+//         0
+//     } else {
+//         (n.ilog2() + 1) as usize
+//     }
+// }
 
 impl PyMt19937 {
     /// Allows making randomly selecting elements from a collection in a manner compatible with
@@ -430,8 +448,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(vec![1, 2, 3]);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -445,8 +463,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed("Hello World 123");
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -460,8 +478,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(123_u8);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -475,8 +493,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(312_u16);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -490,8 +508,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(65_536_u32);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -505,8 +523,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(2_u64.pow(32) + 51_231);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -520,8 +538,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(2_u128.pow(64) + 51_239_123);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -535,8 +553,8 @@ mod tests {
             let mut twister = PyMt19937::py_seed(123_u128);
             assert_eq!(
                 &(0..10)
-                    .map(|_| twister.getrandbits(10)[0])
-                    .collect::<Vec<_>>(),
+                    .map(|_| twister.getrandbits(10).try_into().unwrap())
+                    .collect::<Vec<u32>>(),
                 &correct
             )
         }
@@ -562,16 +580,22 @@ mod tests {
         let mut twister = PyMt19937::py_seed("Pizza");
         assert_eq!(
             &(0..10)
-                .map(|_| twister.randbelow_with_getrandbits(100))
-                .collect::<Vec<_>>(),
+                .map(|_| twister
+                    .randbelow_with_getrandbits(&BigUint::from(100_u32))
+                    .try_into()
+                    .unwrap())
+                .collect::<Vec<u32>>(),
             &correct
         );
         // `[random.randrange(10_000) for i in range(10)]`
         let correct = [2306, 7958, 1402, 2301, 2970, 7787, 5438, 6340, 7300, 140];
         assert_eq!(
             &(0..10)
-                .map(|_| twister.randbelow_with_getrandbits(10_000))
-                .collect::<Vec<_>>(),
+                .map(|_| twister
+                    .randbelow_with_getrandbits(&BigUint::from(10_000_u32))
+                    .try_into()
+                    .unwrap())
+                .collect::<Vec<u32>>(),
             &correct
         );
     }
@@ -585,8 +609,12 @@ mod tests {
         let mut twister = PyMt19937::py_seed("Pizza");
         assert_eq!(
             &(0..10)
-                .map(|_| twister.randrange_from_zero(43_057).unwrap())
-                .collect::<Vec<_>>(),
+                .map(|_| twister
+                    .randrange_from_zero(&BigUint::from(43_057_u32))
+                    .unwrap()
+                    .try_into()
+                    .unwrap())
+                .collect::<Vec<u32>>(),
             &correct
         );
     }
@@ -600,8 +628,16 @@ mod tests {
         let mut twister = PyMt19937::py_seed("Pizza");
         assert_eq!(
             &(0..10)
-                .map(|_| twister.randrange(42, 43_057, 1).unwrap())
-                .collect::<Vec<_>>(),
+                .map(|_| twister
+                    .randrange(
+                        &BigInt::from(42_u32),
+                        &BigInt::from(43_057_u32),
+                        &BigInt::one()
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap())
+                .collect::<Vec<u32>>(),
             &correct
         );
     }
@@ -615,8 +651,16 @@ mod tests {
         let mut twister = PyMt19937::py_seed("Pizza");
         assert_eq!(
             &(0..10)
-                .map(|_| twister.randrange(42, 43_057, 12).unwrap())
-                .collect::<Vec<_>>(),
+                .map(|_| twister
+                    .randrange(
+                        &BigInt::from(42_u32),
+                        &BigInt::from(43_057_u32),
+                        &BigInt::from(12_u32)
+                    )
+                    .unwrap()
+                    .try_into()
+                    .unwrap())
+                .collect::<Vec<u32>>(),
             &correct
         );
     }
