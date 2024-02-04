@@ -20,13 +20,16 @@
 //! ```
 //! use pyrand::{PyMt19937, PySeedable, RandomChoiceIterator};
 //! let rng = &mut PyMt19937::py_seed("Pizza");
-//! assert_eq!((0..20).choose(rng).take(5).collect::<Vec<_>>(), vec![3, 3, 15, 2, 16]);
+//! assert_eq!(
+//!     (0..20).choose(rng).take(5).collect::<Vec<_>>(),
+//!     vec![3, 3, 15, 2, 16],
+//! );
 //! ```
 //! will return the same result as the equivalent python code
 //! ```python
 //! import random
 //! rng = random.Random("Pizza")
-//! rng.choices(range(20), k=5)
+//! assert rng.choices(range(20), k=5) == [3, 3, 15, 2, 16]
 //! ```
 
 use num::{BigInt, BigUint, One, Signed, Zero};

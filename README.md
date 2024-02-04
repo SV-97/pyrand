@@ -9,7 +9,10 @@ will yield `[3, 3, 15, 2, 16]` and running the equivalent
 ```rust
 use pyrand::{PyMt19937, PySeedable, RandomChoiceIterator};
 let rng = &mut PyMt19937::py_seed("Pizza");
-assert_eq!((0..20).choose(rng).take(5).collect::<Vec<_>>(), vec![3, 3, 15, 2, 16]);
+assert_eq!(
+    (0..20).choose(rng).take(5).collect::<Vec<_>>(),
+    vec![3, 3, 15, 2, 16]
+);
 ```
 will also yield `[3, 3, 15, 2, 16]`.
 
