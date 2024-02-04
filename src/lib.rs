@@ -116,7 +116,7 @@ impl<const N: usize> MTState<N> {
     pub fn genrand_res53<const M: usize>(&mut self) -> f32 {
         let a = self.genrand_uint32::<M>() >> 5;
         let b = self.genrand_uint32::<M>() >> 6;
-        return (a as f32 * 67108864.0 + b as f32) * (1.0 / 9007199254740992.0);
+        (a as f32 * 67108864.0 + b as f32) * (1.0 / 9007199254740992.0)
     }
 
     pub fn genrand_res53_default(&mut self) -> f32 {
@@ -133,7 +133,7 @@ impl<const N: usize> MTState<N> {
             // python is using 32-bit words here to match the MT - we find
             // out how many of those we need
             let words = (num_bits - 1) / 32 + 1;
-            let mut v = Vec::with_capacity(words as usize);
+            let mut v = Vec::with_capacity(words);
             let mut remaining_bits = num_bits;
             if cfg!(target_endian = "big") {
                 // to implement this check _random_Random_getrandbits_impl
@@ -171,7 +171,7 @@ impl<const N: usize> MTState<N> {
         if excl_upper_bound.is_zero() {
             None
         } else {
-            Some(self.randbelow_with_getrandbits(&excl_upper_bound))
+            Some(self.randbelow_with_getrandbits(excl_upper_bound))
         }
     }
 
@@ -184,7 +184,7 @@ impl<const N: usize> MTState<N> {
     ) -> Option<BigInt> {
         // width is strictly positive
         let width = {
-            let w = excl_upper.checked_sub(&incl_lower)?;
+            let w = excl_upper.checked_sub(incl_lower)?;
             if w.is_positive() {
                 Some(BigUint::try_from(w).unwrap())
             } else {
@@ -283,7 +283,7 @@ impl PySeedable<Vec<u8>> for PyMt19937 {
             .map(|b| u32::from_le_bytes(*b))
             .collect();
         let stripped = strip_suffix_iter(&key, &[0]).unwrap_or(&key);
-        PyMt19937::init_by_array(&stripped)
+        PyMt19937::init_by_array(stripped)
     }
 }
 
@@ -292,7 +292,7 @@ impl PySeedable<&[u8]> for PyMt19937 {
     /// We implement the current (version 2) behaviour of this special casing.
     /// To do so we turn the bytes into "large ints" and use those for seeding
     fn py_seed(bytes: &[u8]) -> Self {
-        PyMt19937::py_seed(bytes.into_iter().copied().collect::<Vec<_>>())
+        PyMt19937::py_seed(bytes.to_vec())
     }
 }
 
@@ -337,24 +337,22 @@ fn strip_suffix_iter<'a, T>(s: &'a [T], suffix: &[T]) -> Option<&'a [T]>
 where
     T: PartialEq,
 {
-    if suffix.len() == 0 {
+    if suffix.is_empty() {
         Some(s)
-    } else {
-        if let Some(mut stripped) = s.strip_suffix(suffix) {
-            while let Some(more_stripped) = stripped.strip_suffix(suffix) {
-                stripped = more_stripped;
-            }
-            Some(stripped)
-        } else {
-            None
+    } else if let Some(mut stripped) = s.strip_suffix(suffix) {
+        while let Some(more_stripped) = stripped.strip_suffix(suffix) {
+            stripped = more_stripped;
         }
+        Some(stripped)
+    } else {
+        None
     }
 }
 
 impl PySeedable<&[u32]> for PyMt19937 {
     fn py_seed(key: &[u32]) -> Self {
         // python trims off blocks that only contain zeroes
-        let stripped = strip_suffix_iter(&key, &[0]).unwrap_or(&key);
+        let stripped = strip_suffix_iter(key, &[0]).unwrap_or(key);
         PyMt19937::init_by_array(stripped)
     }
 }
@@ -404,9 +402,7 @@ mod rand_impl {
         }
 
         fn fill_bytes(&mut self, dest: &mut [u8]) {
-            if dest.len() == 0 {
-                ()
-            } else {
+            if !dest.is_empty() {
                 let mut bytes = MaybeUninit::uninit();
                 for (i, b) in dest.iter_mut().enumerate() {
                     let j = i % 4;
