@@ -1,6 +1,6 @@
 [package]
 name = "pyrand"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Stefan Volz <volzstefan97+pyrand@googlemail.com>"]
 description = "Pure rust implementation of python's random module with compatible PRNG behaviour: seeding with equivalent values will yield identical PRNG output."
