@@ -214,15 +214,6 @@ impl<const N: usize> MTState<N> {
     }
 }
 
-// Minimal number of bits necessary to represent given number
-// fn bit_length(n: u32) -> usize {
-//     if n == 0 {
-//         0
-//     } else {
-//         (n.ilog2() + 1) as usize
-//     }
-// }
-
 impl PyMt19937 {
     /// Allows making randomly selecting elements from a collection in a manner compatible with
     /// python's `random.choices`. Weighted choices currently not implemented - should be a
@@ -248,6 +239,18 @@ impl<'a, T: Clone> Iterator for Choices<'a, T> {
         Some(self.population[i].clone())
     }
 }
+
+/// Iterator extension trait to provide fluent interface for python choices
+pub trait RandomChoiceIterator: Iterator {
+    fn choose<'a>(&mut self, rng: &'a mut PyMt19937) -> Choices<'a, Self::Item>
+    where
+        Self: Sized,
+    {
+        rng.choices(self)
+    }
+}
+
+impl<T: Iterator> RandomChoiceIterator for T {}
 
 /// Trait for python-compatibly seedable Rngs
 pub trait PySeedable<Seed> {
@@ -657,6 +660,36 @@ mod tests {
                     .try_into()
                     .unwrap())
                 .collect::<Vec<u32>>(),
+            &correct
+        );
+    }
+
+    #[test]
+    fn rangrange_large() {
+        // `random.seed("Pizza"); [random.randrange(42, 10**100) for i in range(10)]`
+        let correct = [
+            BigInt::parse_bytes(b"9579866485220884275812008134464035965241537083189421689381792593824445882708815065843427244115679591", 10).unwrap(),
+            BigInt::parse_bytes(b"3888203122170713226666112762701632817564811813426175309426977673877400812229713204130602887840425185", 10).unwrap(),
+            BigInt::parse_bytes(b"5671731618993807604597264481562670303958256589845472646965893604588043197507096527112390358858623451", 10).unwrap(),
+            BigInt::parse_bytes(b"4194032766356154954455712807769223619918079113218561184406604612474027197687254690833120987693660483", 10).unwrap(),
+            BigInt::parse_bytes(b"7476178950561835834867063441551291285800190891810969659540612285203169282520874331082648528181368436", 10).unwrap(),
+            BigInt::parse_bytes(b"1861103480107524638919591893137299509305415151477751224752864145416695733183243089594346927767194340", 10).unwrap(),
+            BigInt::parse_bytes(b"3922203142767393832538673954495653361515200423210709219982766035391585977477681283927291826719657524", 10).unwrap(),
+            BigInt::parse_bytes(b"6128897628109692866058641368274476540862767831381945527933770759683809548646997692265219366175075688", 10).unwrap(),
+            BigInt::parse_bytes(b"9584709203694536284250111641038241722576534138774799060713437581067222978206646281627216084226872580", 10).unwrap(),
+            BigInt::parse_bytes(b"3033019269308996974263424226402724479542287417888143915688162688154376377154955676213661065686678850", 10).unwrap()
+        ];
+        let mut twister = PyMt19937::py_seed("Pizza");
+        assert_eq!(
+            &(0..10)
+                .map(|_| twister
+                    .randrange(
+                        &BigInt::from(42_u32),
+                        &BigInt::from(10_u32).pow(100),
+                        &BigInt::one(),
+                    )
+                    .unwrap())
+                .collect::<Vec<BigInt>>(),
             &correct
         );
     }
