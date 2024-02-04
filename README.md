@@ -7,9 +7,9 @@ rng.choices(range(20), k=5)
 ```
 will yield `[3, 3, 15, 2, 16]` and running the equivalent
 ```rust
-use pyrand::{PyMt19937, PySeed};
-let mut rng = PyMt19937::py_seed("Pizza");
-rng.choices(0..20).take(5).collect::<Vec<_>>()
+use pyrand::{PyMt19937, PySeedable, RandomChoiceIterator};
+let rng = &mut PyMt19937::py_seed("Pizza");
+assert_eq!((0..20).choose(rng).take(5).collect::<Vec<_>>(), vec![3, 3, 15, 2, 16]);
 ```
 will also yield `[3, 3, 15, 2, 16]`.
 
@@ -30,10 +30,6 @@ and your users somehow end up depending on that result in some way. Then your ap
 I actually ran into the unfortunate case of having some Python code where this was the case. I wanted to rewrite that code in Rust and kind off couldn't without also pulling in Python to handle the PRNG part (or statically linking parts of CPython or whatever) - which would've killed the whole rewrite. So long story short: I reimplemented the central functionality of python's random number generation code in rust, making sure to retain constistent output between the two implementations.
 
 If you actually need this kind of compatibility for some of the functions I haven't implemented yet feel free to implement them and open a pull request - or file an issue on the GitHub repo.
-
-## Arbitrary-precision integer seeding
-
-I implemented seeding for all unsigned numeric types up to `u128` but there is no counterpart for Python's arbitrary-precision integer type yet, because I didn't wanna pull in an external bigint crate for that (and don't think there's a huge point in implementing a custom bigint type just for this crate). If you need the functionality: the algorithm used in the `u64` and `u128` implementations should trivially generalize: convert your bigint to a sequence of `u32`s (little endian) and seed with a `u32` slice.
 
 ## `rand` support
 
