@@ -13,6 +13,21 @@
 //!
 //! Note that while a `rand` implementation is given you shouldn't expect most methods
 //! from `rand::Rand` to return the same values as their python counterparts.
+//!
+//! # Examples
+//!
+//! Choosing random values from a collection like
+//! ```
+//! use pyrand::{PyMt19937, PySeedable, RandomChoiceIterator};
+//! let rng = &mut PyMt19937::py_seed("Pizza");
+//! assert_eq!((0..20).choose(rng).take(5).collect::<Vec<_>>(), vec![3, 3, 15, 2, 16]);
+//! ```
+//! will return the same result as the equivalent python code
+//! ```python
+//! import random
+//! rng = random.Random("Pizza")
+//! rng.choices(range(20), k=5)
+//! ```
 
 use num::{BigInt, BigUint, One, Signed, Zero};
 use sha2::{Digest, Sha512};
